@@ -1,0 +1,192 @@
+services:
+  # --- VECTOR DB (Qdrant) ---
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333" # HTTP API
+      - "6334:6334" # GRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  
+
+  # --- EMBEDDING INFERENCE (Infinity) ---
+  infinity:
+    image: michaelf34/infinity:latest
+    container_name: infinity
+    runtime: nvidia
+    ipc: host
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    command: >
+      v2
+      --model-id ${EMBEDDING_MODEL_ID}
+      --served-model-name embed
+      --model-id ${RERANK_MODEL_ID}
+      --served-model-name rerank
+      --port 8001
+      --batch-size 32
+      --device cuda
+      --permissive-cors
+      --url-prefix /v1
+    ports:
+      - "8001:8001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+
+# --- LEDGER (PostgreSQL) ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-litepipe}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-__CHANGE_ME__}
+      POSTGRES_DB: ${DB_NAME:-litepipe}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    # Wait for DB to be up
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-litepipe} -d ${DB_NAME:-litepipe}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    restart: unless-stopped
+
+
+  # --- BLOB STORAGE (MinIO / S3) ---
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    # Init server with /data path
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-litepipe}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-__CHANGE_ME__}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000" # S3 API Port
+      - "9001:9001" # Web Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+
+  # --- DOCUMENT CONVERSION (Docling Serve) ---
+  docling:
+    build: ./docling
+    container_name: docling
+    runtime: nvidia
+    environment:
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=5001
+      - DOCLING_SERVE_ENABLE_UI=0
+      - DOCLING_SERVE_API_KEY=${DOCLING_API_KEY:-__CHANGE_ME__}
+      - DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS=true
+      - TORCH_DEVICE=cuda
+      - RECOGNITION_BATCH_SIZE=128
+      - DETECTOR_BATCH_SIZE=16
+      - HF_HOME=/root/.cache/huggingface
+    ports:
+      - "5001:5001"
+    volumes:
+      - docling_cache:/opt/app-root/src/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    
+
+  # --- PIPELINE (Litepipe) ---
+  litepipe:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: litepipe
+    runtime: nvidia
+    environment:
+      - PYTHONPATH=/app
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - VISION_API_URL=http://vllm:8000/v1/chat/completions
+      - VISION_MODEL_NAME=${VISION_MODEL_ID}
+      - EMBEDDING_API_URL=http://infinity:8001
+      - QDRANT_URL=http://qdrant:6333
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-litepipe}
+      - DB_PASSWORD=${DB_PASSWORD:-__CHANGE_ME__}
+      - DB_NAME=${DB_NAME:-litepipe}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-litepipe}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-__CHANGE_ME__}
+      - S3_REGION=${S3_REGION:-eu-north-1}
+      - DOCLING_URL=http://docling:5001
+      - DOCLING_API_KEY=${DOCLING_API_KEY:-__CHANGE_ME__}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - ./src:/app/src
+    ports:
+      - "5000:5000"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      docling:
+        condition: service_healthy
+      infinity:
+        condition: service_healthy
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]
+    restart: unless-stopped
+
+
+volumes:
+  hf_cache:
+  qdrant_data:
+  postgres_data:
+  minio_data:
+  docling_cache:

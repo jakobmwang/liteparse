@@ -1,11 +1,18 @@
 [project]
 name = "litepipe"
 version = "0.1.0"
-description = "Standardized document ingestion preparation with minimal configuration."
+description = "Document ingestion pipeline services."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docling",
+    "langchain_text_splitters",
+    "polars",
+    "uvicorn",
+    "filetype",
+    "aioboto3",
+    "botocore",
+    "dotenv",
+    "clevercsv",
 ]
 
 [build-system]
