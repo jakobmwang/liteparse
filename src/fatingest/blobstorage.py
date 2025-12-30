@@ -1,4 +1,4 @@
-# src/litepipe/blobstorage.py
+# src/fatingest/blobstorage.py
 """
 Async S3/MinIO blob storage with fan-out content-addressable SHA256 keys.
 """
@@ -9,9 +9,8 @@ import os
 from botocore.exceptions import ClientError
 from typing import BinaryIO, Any
 
-BUCKETS = ["document-cache", "markdown-cache", "chunk-cache"]
 
-logger = logging.getLogger()
+logger = logging.getLogger("BlobStorage")
 
 
 class BlobStorage:
@@ -29,27 +28,26 @@ class BlobStorage:
         """
         return self.session.client(
             "s3",
-            endpoint_url=os.getenv("S3_ENDPOINT_URL", "http://localhost:9000"),
-            aws_access_key_id=os.getenv("S3_ACCESS_KEY", "litepipe"),
-            aws_secret_access_key=os.getenv("S3_SECRET_KEY", "__CHANGE_ME__"),
+            endpoint_url=os.getenv("S3_ENDPOINT_URL", "http://minio:9000"),
+            aws_access_key_id=os.getenv("S3_ACCESS_KEY", "fatingest"),
+            aws_secret_access_key=os.getenv("S3_SECRET_KEY", "fatingest"),
             region_name=os.getenv("S3_REGION", "eu-north-1")
         )
 
 
-    async def ensure_buckets(self) -> None:
+    async def ensure_bucket(self, bucket) -> None:
         """
-        Idempotently create buckets if they do not exist.
+        Idempotently create bucket if it does not exist.
         """
         async with self._client() as s3:
-            for bucket in BUCKETS:
+            try:
+                await s3.head_bucket(Bucket=bucket)
+            except ClientError:
+                logger.info(f"Creating bucket: {bucket}")
                 try:
-                    await s3.head_bucket(Bucket=bucket)
-                except ClientError:
-                    logger.info(f"Creating bucket: {bucket}")
-                    try:
-                        await s3.create_bucket(Bucket=bucket)
-                    except ClientError as e:
-                        logger.error(f"Failed to create {bucket}: {e}")
+                    await s3.create_bucket(Bucket=bucket)
+                except ClientError as e:
+                    logger.error(f"Failed to create {bucket}: {e}")
 
 
     async def key(self, file_bytes: bytes | BinaryIO) -> str:
@@ -66,14 +64,15 @@ class BlobStorage:
         bucket: str,
         file_bytes: bytes | BinaryIO,
         file_name: str = "Untitled",
-        content_type: str = "application/octet-stream"
+        content_type: str = "application/octet-stream",
+        key: str | None = None
     ) -> str:
         """
         Store file bytes and return CAS key.
         Optionally store original file name as metadata.
         """
         file_bytes = file_bytes.read() if isinstance(file_bytes, BinaryIO) else file_bytes
-        key = await self.key(file_bytes)
+        key = key if key is not None else await self.key(file_bytes)
         metadata = {'file_name': file_name}
         async with self._client() as s3:
             await s3.put_object(

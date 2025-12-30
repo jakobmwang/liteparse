@@ -63,16 +63,16 @@ services:
     image: postgres:16-alpine
     container_name: postgres
     environment:
-      POSTGRES_USER: ${DB_USER:-litepipe}
+      POSTGRES_USER: ${DB_USER:-fatingest}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-__CHANGE_ME__}
-      POSTGRES_DB: ${DB_NAME:-litepipe}
+      POSTGRES_DB: ${DB_NAME:-fatingest}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     # Wait for DB to be up
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-litepipe} -d ${DB_NAME:-litepipe}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-fatingest} -d ${DB_NAME:-fatingest}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -90,7 +90,7 @@ services:
     # Init server with /data path
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-litepipe}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-fatingest}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-__CHANGE_ME__}
     volumes:
       - minio_data:/data
@@ -105,47 +105,13 @@ services:
     restart: unless-stopped
 
 
-  # --- Docling Serve ---
-  docling:
-    build: ./docling
-    container_name: docling
-    runtime: nvidia
-    environment:
-      - UVICORN_HOST=0.0.0.0
-      - UVICORN_PORT=5001
-      - DOCLING_SERVE_ENABLE_UI=0
-      - DOCLING_SERVE_API_KEY=${DOCLING_API_KEY:-__CHANGE_ME__}
-      - DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS=true
-      - TORCH_DEVICE=cuda
-      - RECOGNITION_BATCH_SIZE=128
-      - DETECTOR_BATCH_SIZE=16
-      - HF_HOME=/root/.cache/huggingface
-    ports:
-      - "5001:5001"
-    volumes:
-      - docling_cache:/opt/app-root/src/.cache
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/docs"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
-
 # --- Faster Whisper Server ---
   whisper:
     image: fedirz/faster-whisper-server:latest-cuda
     container_name: whisper
     runtime: nvidia
     environment:
-      - WHISPER__MODEL=large-v3  # CHANGE TO large-v3 WHEN L40S
+      - WHISPER__MODEL=large-v3-turbo  # CHANGE TO large-v3 WHEN L40S
       - WHISPER__COMPUTE_TYPE=int8  # CHANGE TO float16 WHEN L40S IF POOR PERFORMANCE
       - WHISPER__INFERENCE_DEVICE=cuda
     volumes:
@@ -167,12 +133,20 @@ services:
     restart: unless-stopped
 
 
-  # --- Litepipe ---
-  litepipe:
+# --- Gotenberg ---
+services:
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    ports:
+      - "3000:3000"
+
+
+  # --- Fatingest ---
+  fatingest:
     build: 
       context: .
       dockerfile: Dockerfile
-    container_name: litepipe
+    container_name: fatingest
     runtime: nvidia
     environment:
       - PYTHONPATH=/app
@@ -183,11 +157,11 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_USER=${DB_USER:-litepipe}
+      - DB_USER=${DB_USER:-fatingest}
       - DB_PASSWORD=${DB_PASSWORD:-__CHANGE_ME__}
-      - DB_NAME=${DB_NAME:-litepipe}
+      - DB_NAME=${DB_NAME:-fatingest}
       - S3_ENDPOINT=http://minio:9000
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-litepipe}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-fatingest}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-__CHANGE_ME__}
       - S3_REGION=${S3_REGION:-eu-north-1}
       - DOCLING_URL=http://docling:5001

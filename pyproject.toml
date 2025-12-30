@@ -1,7 +1,7 @@
 [project]
 name = "fatingest"
 version = "0.1.0"
-description = "Document ingestion pipeline services."
+description = "Take it all in."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,6 +12,9 @@ dependencies = [
     "botocore",
     "dotenv",
     "clevercsv",
+    "httpx",
+    "markdownify",
+    "markdown",
 ]
 
 [build-system]

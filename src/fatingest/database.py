@@ -1,4 +1,4 @@
-# src/litepipe/database.py
+# src/fatingest/database.py
 """
 Async PostgreSQL ledger for documents and chunks.
 """

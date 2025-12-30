@@ -1,4 +1,4 @@
-# src/litepipe/main.py
+# src/fatingest/main.py
 
 from typing import List, Optional, Dict, Any
 from pathlib import Path
